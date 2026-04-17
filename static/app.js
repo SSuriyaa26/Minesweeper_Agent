@@ -1,24 +1,16 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Minesweeper AI — Interactive Frontend
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// State
 let isAutoRunning = false;
 let autoTimer = null;
+let sessionId = null;
 let currentSettings = { rows: 9, cols: 9, mines: 10 };
-let lastLogId = 0; // Simple counter to track unique log entries
 let moveCount = 0;
 
-// DOM Elements
 const boardContainer = document.getElementById('board-container');
-const statusEl = document.getElementById('game-status');
+const statusDot = document.getElementById('status-dot');
+const statusChip = document.getElementById('chip-status');
 const minesEl = document.getElementById('game-mines');
 const moveNumberEl = document.getElementById('move-number');
 const logContainer = document.getElementById('log-container');
 const gameOverlay = document.getElementById('game-overlay');
-const overlayIcon = document.getElementById('overlay-icon');
-const overlayTitle = document.getElementById('overlay-title');
-const overlaySubtitle = document.getElementById('overlay-subtitle');
 
 const btnNewGame = document.getElementById('btn-new-game');
 const btnOverlayNew = document.getElementById('btn-overlay-new');
@@ -28,9 +20,7 @@ const difficultySelect = document.getElementById('board-size');
 const speedSlider = document.getElementById('speed-slider');
 const speedValueMs = document.getElementById('speed-value-ms');
 const speedControl = document.getElementById('speed-control');
-const chipStatus = document.getElementById('chip-status');
 
-// Pipeline step elements
 const pipeSteps = {
     'CSP': document.getElementById('pipe-csp'),
     'Forward Checking': document.getElementById('pipe-forward'),
@@ -38,27 +28,7 @@ const pipeSteps = {
     'Probabilistic': document.getElementById('pipe-prob'),
 };
 
-// Stats elements
-const barCsp = document.getElementById('bar-csp');
-const barFc = document.getElementById('bar-fc');
-const barBt = document.getElementById('bar-bt');
-const barProb = document.getElementById('bar-prob');
-const countCsp = document.getElementById('count-csp');
-const countFc = document.getElementById('count-fc');
-const countBt = document.getElementById('count-bt');
-const countProb = document.getElementById('count-prob');
-const statGames = document.getElementById('stat-games');
-const statWinrate = document.getElementById('stat-winrate');
-const statTotalMoves = document.getElementById('stat-total-moves');
-
-// ─── INIT ──────────────────────────────────────────────────────────────────
-
 document.addEventListener('DOMContentLoaded', () => {
-    fetchState();
-    setupEventListeners();
-});
-
-function setupEventListeners() {
     btnNewGame.addEventListener('click', startNewGame);
     btnOverlayNew.addEventListener('click', startNewGame);
     btnAgentStep.addEventListener('click', agentNextMove);
@@ -66,26 +36,16 @@ function setupEventListeners() {
     boardContainer.addEventListener('contextmenu', e => e.preventDefault());
 
     speedSlider.addEventListener('input', () => {
-        const val = 830 - parseInt(speedSlider.value); // Invert: slider right = fast = low ms
-        speedValueMs.textContent = val;
+        const val = 830 - parseInt(speedSlider.value);
+        speedValueMs.textContent = `${val}ms`;
         if (isAutoRunning) {
             clearInterval(autoTimer);
             autoTimer = setInterval(agentNextMove, val);
         }
     });
-}
 
-// ─── API CALLS ─────────────────────────────────────────────────────────────
-
-async function fetchState() {
-    try {
-        const res = await fetch('/api/state');
-        const data = await res.json();
-        renderState(data);
-    } catch (err) {
-        console.error('Failed to fetch state:', err);
-    }
-}
+    startNewGame();
+});
 
 async function startNewGame() {
     const val = difficultySelect.value.split(',');
@@ -96,22 +56,25 @@ async function startNewGame() {
     };
 
     if (isAutoRunning) toggleAutoRun();
-    gameOverlay.classList.remove('visible');
+    gameOverlay.classList.add('hidden');
     moveCount = 0;
-    lastLogId = 0;
+    
+    statusDot.className = 'pulse-dot active';
+    statusChip.textContent = 'Initializing';
 
     try {
         const res = await fetch('/api/new_game', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentSettings)
+            body: JSON.stringify({ ...currentSettings, session_id: sessionId })
         });
         const data = await res.json();
-        logContainer.innerHTML = '<div class="log-empty">Click <strong>"Agent: Next Move"</strong> to watch the AI think…</div>';
+        sessionId = data.session_id;
+        logContainer.innerHTML = '<div class="trace-empty">Awaiting execution...</div>';
         clearPipeline();
         renderState(data);
     } catch (err) {
-        console.error('Failed to start new game:', err);
+        console.error('Failed to init game:', err);
     }
 }
 
@@ -121,58 +84,58 @@ async function humanAction(r, c, action) {
         const res = await fetch('/api/human_action', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ r, c, action })
+            body: JSON.stringify({ r, c, action, session_id: sessionId })
         });
         const data = await res.json();
         renderState(data);
     } catch (err) {
-        console.error('Human action failed:', err);
+        console.error('Action payload rejected:', err);
     }
 }
 
 async function agentNextMove() {
     try {
-        const res = await fetch('/api/agent_move', { method: 'POST' });
+        const res = await fetch('/api/agent_move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId })
+        });
         const data = await res.json();
         renderState(data);
         if (data.status !== 'ONGOING' && isAutoRunning) {
             toggleAutoRun();
         }
     } catch (err) {
-        console.error('Agent move failed:', err);
+        console.error('Agent invocation failed:', err);
         if (isAutoRunning) toggleAutoRun();
     }
 }
-
-// ─── AUTO RUN ──────────────────────────────────────────────────────────────
 
 function toggleAutoRun() {
     isAutoRunning = !isAutoRunning;
 
     if (isAutoRunning) {
         btnAgentAuto.classList.add('active');
-        btnAgentAuto.innerHTML = `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            Stop Auto Run
-        `;
+        btnAgentAuto.textContent = 'Halt';
         btnAgentStep.disabled = true;
-        speedControl.style.display = 'block';
+        speedControl.classList.remove('hidden');
 
         const interval = 830 - parseInt(speedSlider.value);
         autoTimer = setInterval(agentNextMove, interval);
+        
+        statusDot.className = 'pulse-dot active';
+        statusChip.textContent = 'Executing';
     } else {
         btnAgentAuto.classList.remove('active');
-        btnAgentAuto.innerHTML = `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon><line x1="19" y1="3" x2="19" y2="21"></line></svg>
-            Auto Run
-        `;
+        btnAgentAuto.textContent = 'Auto-Run';
         clearInterval(autoTimer);
         btnAgentStep.disabled = false;
-        speedControl.style.display = 'none';
+        speedControl.classList.add('hidden');
+        
+        statusDot.className = 'pulse-dot';
+        statusChip.textContent = 'Standby';
     }
 }
-
-// ─── RENDER STATE ──────────────────────────────────────────────────────────
 
 function renderState(data) {
     const { board, rows, cols, mines, status, flags, mine_map,
@@ -180,194 +143,175 @@ function renderState(data) {
 
     moveCount = move_number || 0;
 
-    // 1. Header chips
-    statusEl.textContent = status;
-    const dot = chipStatus.querySelector('.chip-dot');
-    dot.className = 'chip-dot ' + status.toLowerCase();
-
-    const remaining = mines - flags;
-    minesEl.textContent = `${remaining} / ${mines}`;
+    minesEl.textContent = `${mines - flags}`;
     moveNumberEl.textContent = moveCount;
 
-    // 2. Disable/enable controls
     if (status !== 'ONGOING') {
         btnAgentStep.disabled = true;
         btnAgentAuto.disabled = true;
+        statusDot.className = status === 'WON' ? 'pulse-dot active' : 'pulse-dot error';
+        statusChip.textContent = status === 'WON' ? 'Success' : 'Failed';
         if (isAutoRunning) toggleAutoRun();
-    } else {
-        if (!isAutoRunning) btnAgentStep.disabled = false;
+    } else if (!isAutoRunning) {
+        btnAgentStep.disabled = false;
         btnAgentAuto.disabled = false;
+        statusDot.className = 'pulse-dot';
+        statusChip.textContent = 'Standby';
     }
 
-    // 3. Pipeline highlight
     updatePipeline(last_move_algo);
 
-    // 4. Render Board
     boardContainer.innerHTML = '';
-    boardContainer.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    if (cols > 16) {
-        boardContainer.classList.add('expert');
-    } else {
-        boardContainer.classList.remove('expert');
-    }
+
+    // Calculate maximum available space in the middle panel dynamically
+    const availableWidth = window.innerWidth > 960 ? window.innerWidth - 660 : window.innerWidth - 60;
+    const availableHeight = window.innerHeight - 280;
+    
+    // Calculate the perfect cell size to fit the viewport (-1 to account for grid gap)
+    let size = Math.floor(Math.min(availableWidth / cols, availableHeight / rows)) - 1;
+    // Base bounds for safety
+    size = Math.max(14, Math.min(size, 46));
+    
+    boardContainer.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
+    boardContainer.style.gridTemplateRows = `repeat(${rows}, ${size}px)`;
+    boardContainer.style.setProperty('--cell-size', `${size}px`);
+
+    // Use a DocumentFragment so the 900 cells load instantly at the same time
+    const fragment = document.createDocumentFragment();
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             const cellVal = board[r][c];
-            const cellDiv = document.createElement('div');
-            cellDiv.className = 'cell';
+            const cell = document.createElement('div');
+            cell.className = 'cell';
 
             if (status === 'ONGOING') {
-                cellDiv.addEventListener('mousedown', (e) => {
-                    if (e.button === 0) humanAction(r, c, 'REVEAL');
-                    else if (e.button === 2) humanAction(r, c, 'FLAG');
+                cell.addEventListener('click', (e) => {
+                    humanAction(r, c, 'REVEAL');
+                });
+                cell.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    humanAction(r, c, 'FLAG');
                 });
             }
 
-            if (cellVal === 'H') {
-                cellDiv.classList.add('hidden');
-            } else if (cellVal === 'F') {
-                cellDiv.classList.add('hidden', 'flag');
-            } else if (cellVal === 'M') {
-                cellDiv.classList.add('revealed', 'mine', 'mine-hit');
-            } else {
-                cellDiv.classList.add('revealed');
+            if (cellVal === 'H') cell.classList.add('covered');
+            else if (cellVal === 'F') cell.classList.add('covered', 'flag');
+            else if (cellVal === 'M') cell.classList.add('revealed', 'mine', 'mine-hit');
+            else {
+                cell.classList.add('revealed');
                 if (cellVal > 0) {
-                    cellDiv.setAttribute('data-val', cellVal);
-                    cellDiv.textContent = cellVal;
+                    cell.setAttribute('data-val', cellVal);
+                    cell.textContent = cellVal;
                 }
             }
 
-            // Lost: show all mines
             if (status === 'LOST' && mine_map && mine_map[r][c]) {
-                if (!cellDiv.classList.contains('flag') && !cellDiv.classList.contains('mine-hit')) {
-                    cellDiv.classList.add('revealed', 'mine');
+                if (!cell.classList.contains('flag') && !cell.classList.contains('mine-hit')) {
+                    cell.classList.add('revealed', 'mine');
                 }
             }
+            
+            if (status === 'WON' && cellVal === 'H') cell.classList.add('flag');
 
-            // Won: auto-flag remaining
-            if (status === 'WON' && cellVal === 'H') {
-                cellDiv.classList.add('flag');
-            }
-
-            // Highlight last move
             if (last_move_cell && last_move_cell[0] === r && last_move_cell[1] === c) {
-                if (last_log && last_log.action === 'FLAG') {
-                    cellDiv.classList.add('last-move-flag');
-                } else {
-                    cellDiv.classList.add('last-move');
-                }
+                cell.classList.add('last-move');
             }
 
-            boardContainer.appendChild(cellDiv);
+            fragment.appendChild(cell);
         }
     }
+    
+    boardContainer.appendChild(fragment);
 
-    // 5. Game Over Overlay
     if (status === 'WON') {
-        overlayIcon.textContent = '🎉';
-        overlayTitle.textContent = 'Victory!';
-        overlayTitle.style.color = 'var(--accent-green)';
-        overlaySubtitle.textContent = `AI cleared the board in ${moveCount} moves`;
-        gameOverlay.classList.add('visible');
+        document.getElementById('overlay-title').textContent = 'Task Completed';
+        document.getElementById('overlay-subtitle').textContent = `Target achieved in ${moveCount} cycles.`;
+        gameOverlay.classList.remove('hidden');
     } else if (status === 'LOST') {
-        overlayIcon.textContent = '💥';
-        overlayTitle.textContent = 'Game Over';
-        overlayTitle.style.color = 'var(--accent-red)';
-        overlaySubtitle.textContent = `Hit a mine after ${moveCount} moves`;
-        gameOverlay.classList.add('visible');
+        document.getElementById('overlay-title').textContent = 'Execution Failed';
+        document.getElementById('overlay-subtitle').textContent = `Constraint violated at cycle ${moveCount}.`;
+        gameOverlay.classList.remove('hidden');
     }
 
-    // 6. Stats Dashboard
     if (stats) {
-        updateStats(stats);
+        document.getElementById('count-csp').textContent = stats.algo_counts['CSP'] || 0;
+        document.getElementById('count-fc').textContent = stats.algo_counts['Forward Checking'] || 0;
+        document.getElementById('count-bt').textContent = stats.algo_counts['Backtracking'] || 0;
+        document.getElementById('count-prob').textContent = stats.algo_counts['Probabilistic'] || 0;
+        
+        const totalAlgos = (stats.algo_counts['CSP'] || 0) + (stats.algo_counts['Forward Checking'] || 0) + (stats.algo_counts['Backtracking'] || 0) + (stats.algo_counts['Probabilistic'] || 0) || 1;
+        document.getElementById('bar-csp').style.width = ((stats.algo_counts['CSP'] || 0)/totalAlgos*100) + '%';
+        document.getElementById('bar-fc').style.width = ((stats.algo_counts['Forward Checking'] || 0)/totalAlgos*100) + '%';
+        document.getElementById('bar-bt').style.width = ((stats.algo_counts['Backtracking'] || 0)/totalAlgos*100) + '%';
+        document.getElementById('bar-prob').style.width = ((stats.algo_counts['Probabilistic'] || 0)/totalAlgos*100) + '%';
+
+        document.getElementById('stat-games').textContent = stats.games_played;
+        // Backend returns e.g. 50.0 natively, do not multiply by 100 again!
+        document.getElementById('stat-winrate').textContent = `${stats.win_rate}%`;
+        document.getElementById('stat-total-moves').textContent = stats.total_moves;
     }
 
-    // 7. Reasoning Log
-    if (last_log) {
-        appendLogEntry(last_log);
-    }
+    if (last_log) appendLogEntry(last_log);
 }
 
-// ─── PIPELINE ──────────────────────────────────────────────────────────────
-
 function updatePipeline(algo) {
-    // Clear all active
-    Object.values(pipeSteps).forEach(el => el.classList.remove('active'));
-
-    if (algo && pipeSteps[algo]) {
-        pipeSteps[algo].classList.add('active');
-    }
+    clearPipeline();
+    if (algo && pipeSteps[algo]) pipeSteps[algo].classList.add('active');
 }
 
 function clearPipeline() {
     Object.values(pipeSteps).forEach(el => el.classList.remove('active'));
 }
 
-// ─── STATS ─────────────────────────────────────────────────────────────────
-
-function updateStats(stats) {
-    const ac = stats.algo_counts || {};
-    const csp = ac['CSP'] || 0;
-    const fc = ac['Forward Checking'] || 0;
-    const bt = ac['Backtracking'] || 0;
-    const prob = ac['Probabilistic'] || 0;
-    const total = csp + fc + bt + prob || 1;
-
-    countCsp.textContent = csp;
-    countFc.textContent = fc;
-    countBt.textContent = bt;
-    countProb.textContent = prob;
-
-    barCsp.style.width = (csp / total * 100) + '%';
-    barFc.style.width = (fc / total * 100) + '%';
-    barBt.style.width = (bt / total * 100) + '%';
-    barProb.style.width = (prob / total * 100) + '%';
-
-    statGames.textContent = stats.games_played;
-    statWinrate.textContent = stats.win_rate + '%';
-    statTotalMoves.textContent = stats.total_moves;
-}
-
-// ─── LOG ───────────────────────────────────────────────────────────────────
-
 function appendLogEntry(entry) {
-    const emptyMsg = logContainer.querySelector('.log-empty');
+    const emptyMsg = logContainer.querySelector('.trace-empty');
     if (emptyMsg) emptyMsg.remove();
 
-    // Deduplicate
     const key = `${entry.row},${entry.col},${entry.action},${moveCount}`;
     if (logContainer.querySelector(`[data-key="${key}"]`)) return;
 
-    const algo = entry.algorithm || 'Human';
-    const algoClass = getAlgoClass(algo);
-    const algoTag = getAlgoTagClass(algo);
-
     const div = document.createElement('div');
-    div.className = `log-entry algo-${algoClass}`;
+    div.className = 'trace-entry';
     div.setAttribute('data-key', key);
+    
     div.innerHTML = `
-        <div class="log-header">
-            <span class="log-action">#${moveCount} ${entry.action} → (${entry.row}, ${entry.col})</span>
-            <span class="log-algo-tag ${algoTag}">${algo}</span>
+        <div class="trace-header">
+            <span>Cycle ${moveCount} &mdash; ${entry.action} [${entry.row}, ${entry.col}]</span>
+            <span class="trace-algo">${entry.algorithm || 'Manual'}</span>
         </div>
-        <div class="log-body">${entry.explanation}</div>
+        <div class="trace-msg">${entry.explanation}</div>
     `;
     logContainer.appendChild(div);
     logContainer.scrollTop = logContainer.scrollHeight;
 }
 
-function getAlgoClass(algo) {
-    const map = {
-        'CSP': 'csp',
-        'Forward Checking': 'fc',
-        'Backtracking': 'bt',
-        'Probabilistic': 'prob',
-        'Human': 'human'
-    };
-    return map[algo] || 'human';
+// ---------------------------------------------------------------------- //
+// Theme Toggle Logic
+// ---------------------------------------------------------------------- //
+const themeToggle = document.getElementById('theme-toggle');
+const iconSun = document.getElementById('icon-sun');
+const iconMoon = document.getElementById('icon-moon');
+
+const currentTheme = localStorage.getItem('theme') || 'dark';
+if (currentTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    iconMoon.classList.add('hidden-icon'); 
+    iconSun.classList.remove('hidden-icon');
 }
 
-function getAlgoTagClass(algo) {
-    return getAlgoClass(algo); // Same mapping
-}
+themeToggle.addEventListener('click', () => {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (isLight) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'dark');
+        iconSun.classList.add('hidden-icon');
+        iconMoon.classList.remove('hidden-icon');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+        iconMoon.classList.add('hidden-icon');
+        iconSun.classList.remove('hidden-icon');
+    }
+});

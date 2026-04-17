@@ -2,7 +2,7 @@
 
 A robust, interactive web application featuring an intelligent agent that autonomously plays Minesweeper. Watch the AI solve boards in real-time while it explains every decision it makes. 
 
-Built natively in Python from scratch—without external ML libraries—using classic Artificial Intelligence techniques (CSP, Backtracking, Minimax).
+Built natively in Python from scratch—without external ML libraries—using classic Artificial Intelligence techniques (CSP, Backtracking, Probabilistic Risk Minimization).
 
 ---
 
@@ -27,7 +27,7 @@ The AI Agent acts in a Perception → Decision → Action loop. At every step, i
    When simple constraints stall, it assigns tentative MINE or SAFE labels to the frontier, immediately checking if any adjacency rules are violated to prune dead-end branches early.
 3. **Backtracking Search** 🔍
    Conducts an exhaustive search over all valid remaining constraint assignments. If a cell is SAFE in 100% of the valid solutions, the AI clicks it confidently.
-4. **Probabilistic Minimax Fallback** 🎲
+4. **Probabilistic Risk-Minimizing Fallback** 🎲
    If forced to guess, the agent estimates the exact probability of a mine for every unknown cell (using solutions from the Backtracking phase + global mine densities) and picks the historically safest mathematical choice.
 
 ---

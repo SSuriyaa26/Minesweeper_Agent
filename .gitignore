@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+Scripts/
+Lib/
+Include/
+etc/
+share/
+.env
+venv/
+env/
+.pytest_cache/

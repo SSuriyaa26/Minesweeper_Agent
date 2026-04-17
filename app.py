@@ -1,5 +1,12 @@
+"""
+app.py — Flask Backend for Minesweeper AI Agent
+=================================================
+REST API serving the game engine and agent over HTTP.
+Uses session-based state management to support multiple concurrent clients.
+"""
+
 import os
-import secrets
+import uuid
 from flask import Flask, jsonify, render_template, request
 
 # Import existing core modules
@@ -9,9 +16,11 @@ from reasoning_log import ReasoningLog
 from stats_tracker import StatsTracker
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
+app.secret_key = os.urandom(32)
 
-# Global in-memory state (fine for localhost single-user tool)
+
+# ─── Session Management ──────────────────────────────────────────────────────
+
 class AppState:
     def __init__(self):
         self.game = MinesweeperGame(9, 9, 10)
@@ -22,11 +31,39 @@ class AppState:
         self.last_move_cell = None      # (r, c) of most recent action
         self.last_move_algo = None       # algorithm used in most recent action
 
-# Singleton state instance
-state = AppState()
+
+# Session store: session_id → AppState
+_sessions: dict[str, AppState] = {}
+MAX_SESSIONS = 50
 
 
-def get_game_state_payload():
+def _get_session(session_id: str) -> AppState | None:
+    """Retrieve a game session by ID, or None if not found."""
+    return _sessions.get(session_id)
+
+
+def _create_session() -> tuple[str, AppState]:
+    """Create a new game session with a unique ID."""
+    # Evict oldest session if at capacity to prevent memory exhaustion
+    if len(_sessions) >= MAX_SESSIONS:
+        oldest_key = next(iter(_sessions))
+        del _sessions[oldest_key]
+    sid = uuid.uuid4().hex
+    state = AppState()
+    _sessions[sid] = state
+    return sid, state
+
+
+def _require_session() -> tuple[AppState | None, str]:
+    """Extract session from request. Returns (state_or_None, session_id)."""
+    if request.is_json:
+        session_id = (request.json or {}).get("session_id", "")
+    else:
+        session_id = request.args.get("session_id", "")
+    return _get_session(session_id), session_id
+
+
+def get_game_state_payload(state: AppState, session_id: str) -> dict:
     """Builds the JSON response containing the full current state."""
     board_view = state.game.get_board_view()
     status_str = state.game.status.name
@@ -51,6 +88,7 @@ def get_game_state_payload():
         }
 
     return {
+        "session_id": session_id,
         "board": board_view,
         "rows": state.game.rows,
         "cols": state.game.cols,
@@ -85,11 +123,21 @@ def index():
 def new_game():
     """Initialize a new game with posted settings."""
     data = request.json or {}
-    rows = int(data.get("rows", 9))
-    cols = int(data.get("cols", 9))
-    mines = int(data.get("mines", 10))
 
-    global state
+    # Input validation: clamp to safe ranges
+    try:
+        rows = max(5, min(int(data.get("rows", 9)), 30))
+        cols = max(5, min(int(data.get("cols", 9)), 30))
+        mines = max(1, min(int(data.get("mines", 10)), rows * cols - 10))
+    except (TypeError, ValueError):
+        rows, cols, mines = 9, 9, 10
+
+    # Reuse existing session (preserves stats across games), or create new
+    session_id = data.get("session_id")
+    state = _get_session(session_id) if session_id else None
+    if state is None:
+        session_id, state = _create_session()
+
     state.game = MinesweeperGame(rows, cols, mines)
     state.log = ReasoningLog()
     state.agent = MinesweeperAgent(state.game, state.log)
@@ -97,18 +145,25 @@ def new_game():
     state.last_move_cell = None
     state.last_move_algo = None
     
-    return jsonify(get_game_state_payload())
+    return jsonify(get_game_state_payload(state, session_id))
 
 @app.route("/api/state", methods=["GET"])
 def get_state():
     """Return the current board state."""
-    return jsonify(get_game_state_payload())
+    state, session_id = _require_session()
+    if state is None:
+        return jsonify({"error": "Invalid or missing session_id"}), 404
+    return jsonify(get_game_state_payload(state, session_id))
 
 @app.route("/api/human_action", methods=["POST"])
 def human_action():
     """Handle a human click (Reveal or Flag)."""
+    state, session_id = _require_session()
+    if state is None:
+        return jsonify({"error": "Invalid or missing session_id"}), 404
+
     if state.game.status != GameStatus.ONGOING:
-        return jsonify(get_game_state_payload())
+        return jsonify(get_game_state_payload(state, session_id))
 
     data = request.json or {}
     action = data.get("action")
@@ -120,12 +175,12 @@ def human_action():
             state.game.reveal(r, c)
             state.log.log_move(r, c, "REVEAL", "Human", "Player clicked Reveal")
         elif action == "FLAG":
-            # Toggle logic
-            current_state = state.game._cell_states[r][c]
-            if current_state == CellState.HIDDEN:
+            # Toggle logic — uses public accessor instead of private _cell_states
+            current_cs = state.game.get_cell_state(r, c)
+            if current_cs == CellState.HIDDEN:
                 state.game.flag(r, c)
                 state.log.log_move(r, c, "FLAG", "Human", "Player clicked Flag")
-            elif current_state == CellState.FLAGGED:
+            elif current_cs == CellState.FLAGGED:
                 state.game.unflag(r, c)
                 state.log.log_move(r, c, "UNFLAG", "Human", "Player unflagged cell")
 
@@ -137,13 +192,17 @@ def human_action():
     if state.game.status != GameStatus.ONGOING:
         state.stats.record_game(state.game.status == GameStatus.WON)
 
-    return jsonify(get_game_state_payload())
+    return jsonify(get_game_state_payload(state, session_id))
 
 @app.route("/api/agent_move", methods=["POST"])
 def agent_move():
     """Ask the AI agent for its next move and apply it."""
+    state, session_id = _require_session()
+    if state is None:
+        return jsonify({"error": "Invalid or missing session_id"}), 404
+
     if state.game.status != GameStatus.ONGOING:
-        return jsonify(get_game_state_payload())
+        return jsonify(get_game_state_payload(state, session_id))
 
     r, c, action, algo = state.agent.next_move()
     state.stats.record_move(algo)
@@ -160,11 +219,14 @@ def agent_move():
     if state.game.status != GameStatus.ONGOING:
         state.stats.record_game(state.game.status == GameStatus.WON)
 
-    return jsonify(get_game_state_payload())
+    return jsonify(get_game_state_payload(state, session_id))
 
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
-    """Return cumulative statistics."""
+    """Return cumulative statistics for a session."""
+    state, session_id = _require_session()
+    if state is None:
+        return jsonify({"error": "Invalid or missing session_id"}), 404
     return jsonify({
         "games_played": state.stats.games_played,
         "wins": state.stats.wins,
@@ -181,4 +243,4 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(os.path.dirname(__file__), "templates"), exist_ok=True)
     os.makedirs(os.path.join(os.path.dirname(__file__), "static"), exist_ok=True)
     
-    app.run(debug=True, port=5000, host="127.0.0.1")
+    app.run(port=5000, host="127.0.0.1")

@@ -3,220 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minesweeper AI Agent — Interactive Demo</title>
-    <meta name="description" content="Interactive Minesweeper AI Agent demonstrating CSP, Forward Checking, Backtracking, and Probabilistic algorithms.">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Minesweeper Engine</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
-    <div class="app-container">
-        
-        <!-- Header -->
-        <header class="header" id="header">
-            <div class="logo">
-                <div class="logo-icon">🤖</div>
-                <div>
-                    <h1>Minesweeper<span class="highlight">AI</span></h1>
-                    <p class="subtitle">Intelligent Agent Demo</p>
+    <div class="app-wrapper">
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                <span>Minesweeper Inference Engine</span>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button id="theme-toggle" class="btn-theme" title="Toggle Light/Dark Mode">
+                    <svg id="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                    <svg id="icon-sun" class="covered" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                </button>
+                <div class="nav-status">
+                    <div class="status-indicator">
+                        <span class="pulse-dot" id="status-dot"></span>
+                        <span id="chip-status">Standby</span>
+                    </div>
                 </div>
             </div>
-            <div class="header-stats">
-                <div class="stat-chip" id="chip-status">
-                    <span class="chip-dot ongoing"></span>
-                    <span id="game-status">ONGOING</span>
-                </div>
-                <div class="stat-chip">
-                    <span class="chip-icon">💣</span>
-                    <span id="game-mines">0 / 0</span>
-                </div>
-                <div class="stat-chip">
-                    <span class="chip-icon">🔢</span>
-                    <span>Move <span id="move-number">0</span></span>
-                </div>
-            </div>
-        </header>
+        </nav>
 
-        <!-- AI Decision Pipeline -->
-        <section class="pipeline-section" id="pipeline-section">
-            <h2 class="section-title">
-                <span class="section-icon">🧠</span>
-                AI Decision Pipeline
-                <span class="pipeline-hint">The agent tries each algorithm in order until one succeeds</span>
-            </h2>
-            <div class="pipeline">
-                <div class="pipeline-step" id="pipe-csp" data-algo="CSP">
-                    <div class="pipe-number">1</div>
-                    <div class="pipe-content">
-                        <h3>CSP</h3>
-                        <p>Constraint Propagation</p>
-                    </div>
-                    <div class="pipe-desc">If remaining mines = hidden neighbors → all are mines. If remaining = 0 → all safe.</div>
-                </div>
-                <div class="pipeline-arrow">→</div>
-                <div class="pipeline-step" id="pipe-forward" data-algo="Forward Checking">
-                    <div class="pipe-number">2</div>
-                    <div class="pipe-content">
-                        <h3>Forward Checking</h3>
-                        <p>Domain Pruning</p>
-                    </div>
-                    <div class="pipe-desc">After each assignment, prune domains that violate constraints immediately.</div>
-                </div>
-                <div class="pipeline-arrow">→</div>
-                <div class="pipeline-step" id="pipe-backtrack" data-algo="Backtracking">
-                    <div class="pipe-number">3</div>
-                    <div class="pipe-content">
-                        <h3>Backtracking</h3>
-                        <p>Exhaustive Search</p>
-                    </div>
-                    <div class="pipe-desc">Enumerate all valid MINE/SAFE assignments; cells same in ALL solutions are deterministic.</div>
-                </div>
-                <div class="pipeline-arrow">→</div>
-                <div class="pipeline-step" id="pipe-prob" data-algo="Probabilistic">
-                    <div class="pipe-number">4</div>
-                    <div class="pipe-content">
-                        <h3>Probabilistic</h3>
-                        <p>Minimax Fallback</p>
-                    </div>
-                    <div class="pipe-desc">Estimate P(mine) for each cell; pick the safest one (lowest probability).</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Main Content: Board + Sidebar -->
-        <main class="main-content">
-            
-            <!-- Left: Game Board -->
-            <section class="game-section">
-                <div class="board-wrapper">
-                    <div class="board-container" id="board-container">
-                        <!-- Grid generated by JS -->
-                    </div>
-                    <!-- Game Over Overlay -->
-                    <div class="game-overlay" id="game-overlay">
-                        <div class="overlay-content">
-                            <div class="overlay-icon" id="overlay-icon">🎉</div>
-                            <h2 id="overlay-title">You Won!</h2>
-                            <p id="overlay-subtitle">The AI successfully cleared the board</p>
-                            <button class="btn primary glow" id="btn-overlay-new">Play Again</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Right: Sidebar -->
-            <section class="sidebar">
-                
-                <!-- Controls Panel -->
-                <div class="panel glass control-panel">
-                    <h2><span class="panel-icon">🎮</span> Game Controls</h2>
-                    
-                    <div class="control-group">
-                        <label for="board-size">Difficulty</label>
-                        <select id="board-size">
-                            <option value="9,9,10">Beginner (9×9, 10 mines)</option>
-                            <option value="16,16,40">Intermediate (16×16, 40 mines)</option>
-                            <option value="16,30,99">Expert (16×30, 99 mines)</option>
+        <div class="main-layout">
+            <!-- Left: Config & Execution -->
+            <aside class="sidebar">
+                <div class="control-section">
+                    <h2 class="section-heading">Configuration</h2>
+                    <div class="input-group">
+                        <label>Difficulty Matrix</label>
+                        <select id="board-size" class="sleek-select">
+                            <option value="9,9,10">Beginner (9x9, 10 mines)</option>
+                            <option value="16,16,40">Intermediate (16x16, 40 mines)</option>
+                            <option value="16,30,99">Expert (16x30, 99 mines)</option>
                         </select>
-                        <button id="btn-new-game" class="btn primary">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.92-10.26l5.33 4.69"/></svg>
-                            New Game
-                        </button>
                     </div>
+                    <button id="btn-new-game" class="btn-primary">Initialize Engine</button>
+                </div>
 
-                    <div class="divider"></div>
-
-                    <h2><span class="panel-icon">🤖</span> AI Controls</h2>
-                    <div class="agent-controls">
-                        <button id="btn-agent-step" class="btn accent">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                            Agent: Next Move
-                        </button>
-                        <button id="btn-agent-auto" class="btn outline">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon><line x1="19" y1="3" x2="19" y2="21"></line></svg>
-                            Auto Run
-                        </button>
-                        <div class="speed-control" id="speed-control" style="display:none;">
-                            <label for="speed-slider">Speed</label>
-                            <div class="slider-row">
-                                <span class="speed-label">Slow</span>
-                                <input type="range" id="speed-slider" min="30" max="800" value="200" step="10">
-                                <span class="speed-label">Fast</span>
-                            </div>
-                            <div class="speed-value"><span id="speed-value-ms">200</span>ms per move</div>
+                <div class="control-section">
+                    <h2 class="section-heading">Execution</h2>
+                    <div class="btn-group">
+                        <button id="btn-agent-step" class="btn-secondary">Step</button>
+                        <button id="btn-agent-auto" class="btn-secondary">Auto-Run</button>
+                    </div>
+                    <div class="slider-group hidden" id="speed-control">
+                        <div class="slider-header">
+                            <label>Delay</label>
+                            <span id="speed-value-ms">200ms</span>
                         </div>
+                        <input type="range" id="speed-slider" min="30" max="800" value="200" step="10">
                     </div>
                 </div>
 
-                <!-- Stats Dashboard Panel -->
-                <div class="panel glass stats-panel">
-                    <h2><span class="panel-icon">📊</span> Algorithm Statistics</h2>
-                    <div class="algo-stats">
-                        <div class="algo-stat-row" data-algo="CSP">
-                            <span class="algo-badge csp">CSP</span>
-                            <div class="algo-bar-track">
-                                <div class="algo-bar csp" id="bar-csp" style="width: 0%"></div>
-                            </div>
-                            <span class="algo-count" id="count-csp">0</span>
-                        </div>
-                        <div class="algo-stat-row" data-algo="Forward Checking">
-                            <span class="algo-badge fc">FC</span>
-                            <div class="algo-bar-track">
-                                <div class="algo-bar fc" id="bar-fc" style="width: 0%"></div>
-                            </div>
-                            <span class="algo-count" id="count-fc">0</span>
-                        </div>
-                        <div class="algo-stat-row" data-algo="Backtracking">
-                            <span class="algo-badge bt">BT</span>
-                            <div class="algo-bar-track">
-                                <div class="algo-bar bt" id="bar-bt" style="width: 0%"></div>
-                            </div>
-                            <span class="algo-count" id="count-bt">0</span>
-                        </div>
-                        <div class="algo-stat-row" data-algo="Probabilistic">
-                            <span class="algo-badge prob">PROB</span>
-                            <div class="algo-bar-track">
-                                <div class="algo-bar prob" id="bar-prob" style="width: 0%"></div>
-                            </div>
-                            <span class="algo-count" id="count-prob">0</span>
-                        </div>
+                <div class="control-section">
+                    <h2 class="section-heading">Telemetry</h2>
+                    <div class="telemetry-grid">
+                        <div class="metric"><span class="label">Total Games</span><span class="value" id="stat-games">0</span></div>
+                        <div class="metric"><span class="label">Win Rate</span><span class="value" id="stat-winrate">0%</span></div>
+                        <div class="metric"><span class="label">Exec Moves</span><span class="value" id="stat-total-moves">0</span></div>
+                        <div class="metric"><span class="label">Active Mines</span><span class="value" id="game-mines">0</span></div>
                     </div>
-                    <div class="stats-summary">
-                        <div class="mini-stat">
-                            <span class="mini-label">Games</span>
-                            <span class="mini-value" id="stat-games">0</span>
-                        </div>
-                        <div class="mini-stat">
-                            <span class="mini-label">Win Rate</span>
-                            <span class="mini-value" id="stat-winrate">0%</span>
-                        </div>
-                        <div class="mini-stat">
-                            <span class="mini-label">Total Moves</span>
-                            <span class="mini-value" id="stat-total-moves">0</span>
+                </div>
+            </aside>
+
+            <!-- Center: Engine View -->
+            <main class="board-area">
+                <div class="pipeline-tracker">
+                    <div class="node" id="pipe-csp">CSP</div>
+                    <div class="edge"></div>
+                    <div class="node" id="pipe-forward">FC</div>
+                    <div class="edge"></div>
+                    <div class="node" id="pipe-backtrack">BT</div>
+                    <div class="edge"></div>
+                    <div class="node" id="pipe-prob">PROB</div>
+                </div>
+
+                <div class="board-glass">
+                    <div id="board-container" class="board"></div>
+                    
+                    <div id="game-overlay" class="game-overlay hidden">
+                        <div class="overlay-card">
+                            <h3 id="overlay-title">Terminal State</h3>
+                            <p id="overlay-subtitle">Execution halted.</p>
+                            <button id="btn-overlay-new" class="btn-primary">Reset</button>
                         </div>
                     </div>
                 </div>
+                <div class="board-footer">Model execution step: <span id="move-number">0</span></div>
+            </main>
 
-                <!-- Reasoning Log Panel -->
-                <div class="panel glass log-panel">
-                    <h2><span class="panel-icon">📝</span> Reasoning Log</h2>
-                    <div class="log-container" id="log-container">
-                        <div class="log-empty">Click <strong>"Agent: Next Move"</strong> to watch the AI think…</div>
+            <!-- Right: Insights -->
+            <aside class="log-sidebar">
+                <div class="section-heading">Execution Trace</div>
+                <div class="trace-container" id="log-container">
+                    <div class="trace-empty">Awaiting execution...</div>
+                </div>
+                
+                <div class="section-heading mt-4">Algorithm Distribution</div>
+                <div class="distribution-bars">
+                    <div class="dist-row">
+                        <span class="dist-label">CSP</span>
+                        <div class="dist-track"><div class="dist-fill fill-csp" id="bar-csp"></div></div>
+                        <span class="dist-val" id="count-csp">0</span>
+                    </div>
+                    <div class="dist-row">
+                        <span class="dist-label">FC</span>
+                        <div class="dist-track"><div class="dist-fill fill-fc" id="bar-fc"></div></div>
+                        <span class="dist-val" id="count-fc">0</span>
+                    </div>
+                    <div class="dist-row">
+                        <span class="dist-label">BT</span>
+                        <div class="dist-track"><div class="dist-fill fill-bt" id="bar-bt"></div></div>
+                        <span class="dist-val" id="count-bt">0</span>
+                    </div>
+                    <div class="dist-row">
+                        <span class="dist-label">PROB</span>
+                        <div class="dist-track"><div class="dist-fill fill-prob" id="bar-prob"></div></div>
+                        <span class="dist-val" id="count-prob">0</span>
                     </div>
                 </div>
-
-            </section>
-        </main>
-    </div>
-
-    <!-- Footer with instructions -->
-    <footer class="footer">
-        <div class="footer-inner">
-            <div class="key-hint"><kbd>Left Click</kbd> Reveal</div>
-            <div class="key-hint"><kbd>Right Click</kbd> Flag / Unflag</div>
-            <div class="key-hint"><kbd>Auto Run</kbd> Watch AI solve</div>
+            </aside>
         </div>
-    </footer>
-
-    <script src="/static/app.js"></script>
+    </div>
+    <script src="/static/app.js?v=6"></script>
 </body>
 </html>

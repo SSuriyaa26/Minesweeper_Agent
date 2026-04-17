@@ -1,3 +1,3 @@
-colorama
-flask
-streamlit
+colorama>=0.4.6
+flask>=3.0.0
+streamlit>=1.30.0

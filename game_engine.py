@@ -251,6 +251,12 @@ class MinesweeperGame:
             if self._cell_states[r][c] == CellState.FLAGGED
         )
 
+    def get_cell_state(self, r: int, c: int) -> CellState:
+        """Return the CellState of the cell at (r, c)."""
+        if 0 <= r < self.rows and 0 <= c < self.cols:
+            return self._cell_states[r][c]
+        return CellState.HIDDEN
+
     def reset(self) -> None:
         """Reset the game to a fresh state (new game, mines not yet placed)."""
         self.status = GameStatus.ONGOING

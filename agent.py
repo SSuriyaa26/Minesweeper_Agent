@@ -7,16 +7,14 @@ applied in strict priority order:
   1. CSP + Constraint Propagation
   2. Forward Checking
   3. Backtracking Search
-  4. Probabilistic Fallback (Minimax under uncertainty)
+  4. Probabilistic Fallback (Risk-minimizing under uncertainty)
 
 No ML libraries — all logic is hand-coded CSP / search / probability.
 """
 
 from __future__ import annotations
 
-import itertools
 import random
-from typing import Optional
 
 from game_engine import MinesweeperGame, GameStatus
 from reasoning_log import ReasoningLog
@@ -247,22 +245,7 @@ class MinesweeperAgent:
           • Cells that are MINE in ALL solutions → deterministic mines
           • Cells that are SAFE in ALL solutions → deterministic safe
         """
-        # Rebuild constraints fresh (deep copy) to avoid mutation issues
-        cons = []
-        frontier_vars: set[tuple[int, int]] = set()
-        for c in constraints:
-            remaining_hidden = c['hidden'] - set(known.keys())
-            remaining_count = c['count']
-            # Adjust count for cells we already know are mines in known
-            for cell in c['hidden'] & set(known.keys()):
-                if known[cell] == 'MINE':
-                    remaining_count -= 1
-            if remaining_hidden:
-                cons.append({
-                    'hidden': set(remaining_hidden),
-                    'count': remaining_count,
-                })
-                frontier_vars.update(remaining_hidden)
+        cons, frontier_vars = self._rebuild_constraints(constraints, known)
 
         if not frontier_vars:
             return set(), set()
@@ -327,6 +310,106 @@ class MinesweeperAgent:
 
         return groups
 
+    # ── Shared helpers (constraint rebuild + solution enumerator) ────────────
+
+    @staticmethod
+    def _rebuild_constraints(
+        constraints: list[dict],
+        known: dict[tuple[int, int], str],
+    ) -> tuple[list[dict], set[tuple[int, int]]]:
+        """
+        Rebuild constraints as fresh copies, filtering out cells already in
+        ``known`` and adjusting mine counts accordingly.
+
+        Returns (clean_constraints, frontier_variables).
+        """
+        clean: list[dict] = []
+        frontier: set[tuple[int, int]] = set()
+        known_keys = set(known.keys())
+        for con in constraints:
+            remaining_hidden = con['hidden'] - known_keys
+            remaining_count = con['count']
+            for cell in con['hidden'] & known_keys:
+                if known[cell] == 'MINE':
+                    remaining_count -= 1
+            if remaining_hidden:
+                clean.append({
+                    'hidden': set(remaining_hidden),
+                    'count': remaining_count,
+                })
+                frontier.update(remaining_hidden)
+        return clean, frontier
+
+
+    def _enumerate_solutions(
+        self,
+        variables: list[tuple[int, int]],
+        constraints: list[dict],
+        max_solutions: int = 1000,
+    ) -> list[dict[tuple[int, int], str]]:
+        """
+        Enumerate all consistent MINE/SAFE assignments over the given variables.
+
+        Uses depth-first search with forward checking: after each tentative
+        assignment, immediately verify all constraints.  If any constraint
+        becomes inconsistent (remaining count < 0, or count > remaining
+        unassigned cells), prune this branch.
+
+        Parameters
+        ----------
+        variables : list of (row, col)
+            Frontier cells to assign.
+        constraints : list of dict
+            Each dict has 'hidden' (set of cells) and 'count' (remaining mines).
+        max_solutions : int
+            Cap on total solutions to keep enumeration tractable.
+
+        Returns
+        -------
+        list of dict mapping (row, col) -> 'MINE' | 'SAFE'
+            All valid complete assignments found (up to max_solutions).
+        """
+        solutions: list[dict[tuple[int, int], str]] = []
+        assignment: dict[tuple[int, int], str] = {}
+
+        def is_consistent() -> bool:
+            """Forward Checking: prune if any constraint is violated."""
+            for con in constraints:
+                assigned_mines = sum(
+                    1 for v in con['hidden']
+                    if assignment.get(v) == 'MINE'
+                )
+                unassigned = [
+                    v for v in con['hidden']
+                    if v not in assignment
+                ]
+                remaining = con['count'] - assigned_mines
+                if remaining < 0:
+                    return False
+                if remaining > len(unassigned):
+                    return False
+                # If all assigned, count must be exactly zero remaining
+                if not unassigned and remaining != 0:
+                    return False
+            return True
+
+        def backtrack(idx: int) -> None:
+            """Depth-first search with forward checking pruning."""
+            if len(solutions) >= max_solutions:
+                return
+            if idx == len(variables):
+                solutions.append(dict(assignment))
+                return
+            cell = variables[idx]
+            for value in ('SAFE', 'MINE'):
+                assignment[cell] = value
+                if is_consistent():
+                    backtrack(idx + 1)
+                del assignment[cell]
+
+        backtrack(0)
+        return solutions
+
     def _backtrack_group(
         self,
         variables: list[tuple[int, int]],
@@ -340,67 +423,11 @@ class MinesweeperAgent:
 
         Caps enumeration at 1000 solutions to stay tractable on large groups.
         """
-        MAX_SOLUTIONS = 1000
-
         # If the group is too large, skip backtracking (probabilistic will handle it)
         if len(variables) > 25:
             return set(), set()
 
-        solutions: list[dict[tuple[int, int], str]] = []
-        assignment: dict[tuple[int, int], str] = {}
-
-        def is_consistent() -> bool:
-            """
-            Forward Checking
-            ----------------
-            After each assignment, check every constraint.
-            A constraint is inconsistent if:
-              - assigned mines already exceed the count
-              - remaining count exceeds remaining unassigned hidden cells
-            """
-            for con in constraints:
-                assigned_mines = sum(
-                    1 for v in con['hidden']
-                    if assignment.get(v) == 'MINE'
-                )
-                unassigned = [
-                    v for v in con['hidden']
-                    if v not in assignment
-                ]
-                assigned_safe = sum(
-                    1 for v in con['hidden']
-                    if assignment.get(v) == 'SAFE'
-                )
-
-                remaining = con['count'] - assigned_mines
-                if remaining < 0:
-                    return False
-                if remaining > len(unassigned):
-                    return False
-                # If all assigned, count must be exactly zero remaining
-                if not unassigned and remaining != 0:
-                    return False
-            return True
-
-        def backtrack(idx: int) -> None:
-            """Depth-first search with forward checking pruning."""
-            if len(solutions) >= MAX_SOLUTIONS:
-                return
-
-            if idx == len(variables):
-                # Complete assignment — record it
-                solutions.append(dict(assignment))
-                return
-
-            cell = variables[idx]
-            for value in ('SAFE', 'MINE'):
-                assignment[cell] = value
-                # Forward Checking: prune immediately if inconsistent
-                if is_consistent():
-                    backtrack(idx + 1)
-                del assignment[cell]
-
-        backtrack(0)
+        solutions = self._enumerate_solutions(variables, constraints)
 
         if not solutions:
             return set(), set()
@@ -420,7 +447,7 @@ class MinesweeperAgent:
         return safe_cells, mine_cells
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  DECISION (d): PROBABILISTIC FALLBACK (MINIMAX UNDER UNCERTAINTY)
+    #  DECISION (d): PROBABILISTIC FALLBACK (RISK-MINIMIZING)
     # ══════════════════════════════════════════════════════════════════════════
 
     def _probabilistic_fallback(
@@ -430,8 +457,8 @@ class MinesweeperAgent:
         known: dict[tuple[int, int], str],
     ) -> tuple[int, int, str, str]:
         """
-        Probabilistic Fallback — Minimax under Uncertainty
-        ---------------------------------------------------
+        Risk-Minimizing Probabilistic Fallback
+        ----------------------------------------
         When no deterministic move is available, estimate the mine probability
         for each unknown cell and choose the safest one (lowest P(mine)).
 
@@ -443,8 +470,8 @@ class MinesweeperAgent:
           3. If no constraints apply at all (e.g. first move after a big clear),
              prefer corners > edges > interior (fewer neighbors = more info).
 
-        This is analogous to Minimax: the "opponent" (mine placement) picks the
-        worst case, and we pick the move that minimizes our maximum risk.
+        The agent picks the move that minimizes the maximum risk of hitting
+        a mine — an argmin P(mine) decision policy.
         """
         rows, cols = self.game.rows, self.game.cols
 
@@ -459,21 +486,8 @@ class MinesweeperAgent:
             # Should not happen, but be safe
             return (0, 0, ACTION_REVEAL, ALGO_PROBABILISTIC)
 
-        # Rebuild constraints and solve again for probability
-        cons = []
-        frontier_vars: set[tuple[int, int]] = set()
-        for c in constraints:
-            remaining_hidden = c['hidden'] - set(known.keys())
-            remaining_count = c['count']
-            for cell in c['hidden'] & set(known.keys()):
-                if known[cell] == 'MINE':
-                    remaining_count -= 1
-            if remaining_hidden:
-                cons.append({
-                    'hidden': set(remaining_hidden),
-                    'count': remaining_count,
-                })
-                frontier_vars.update(remaining_hidden)
+        # Rebuild constraints for probability computation
+        cons, frontier_vars = self._rebuild_constraints(constraints, known)
 
         # Remove cells already determined
         frontier_vars -= set(known.keys())
@@ -515,7 +529,7 @@ class MinesweeperAgent:
             cell = random.choice(list(all_hidden))
             return (*cell, ACTION_REVEAL, ALGO_PROBABILISTIC)
 
-        # ── Minimax decision: pick the cell with lowest mine probability ─────
+        # ── Risk-minimizing decision: pick the cell with lowest mine probability
         # Tie-break: prefer corners > edges > interior (more informative)
         def cell_priority(cell: tuple[int, int]) -> tuple[float, int]:
             r, c = cell
@@ -550,46 +564,13 @@ class MinesweeperAgent:
         Run backtracking over a group and compute P(mine) for each variable
         as: (# solutions where cell=MINE) / (total # solutions).
         """
-        MAX_SOLUTIONS = 1000
-
         if len(variables) > 25:
             # Too large — use uniform estimate
             total_count = sum(c['count'] for c in constraints)
             avg = total_count / max(len(variables), 1)
             return {v: min(max(avg, 0.0), 1.0) for v in variables}
 
-        solutions: list[dict[tuple[int, int], str]] = []
-        assignment: dict[tuple[int, int], str] = {}
-
-        def is_consistent() -> bool:
-            for con in constraints:
-                assigned_mines = sum(
-                    1 for v in con['hidden'] if assignment.get(v) == 'MINE'
-                )
-                unassigned = [v for v in con['hidden'] if v not in assignment]
-                remaining = con['count'] - assigned_mines
-                if remaining < 0:
-                    return False
-                if remaining > len(unassigned):
-                    return False
-                if not unassigned and remaining != 0:
-                    return False
-            return True
-
-        def backtrack(idx: int) -> None:
-            if len(solutions) >= MAX_SOLUTIONS:
-                return
-            if idx == len(variables):
-                solutions.append(dict(assignment))
-                return
-            cell = variables[idx]
-            for value in ('SAFE', 'MINE'):
-                assignment[cell] = value
-                if is_consistent():
-                    backtrack(idx + 1)
-                del assignment[cell]
-
-        backtrack(0)
+        solutions = self._enumerate_solutions(variables, constraints)
 
         if not solutions:
             return {v: 0.5 for v in variables}

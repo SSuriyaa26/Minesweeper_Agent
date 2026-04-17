@@ -184,7 +184,7 @@ def do_human_action(r, c, action_type):
         game.reveal(r, c)
         st.session_state.log.log_move(r, c, "REVEAL", "Human", "Player clicked Reveal")
     elif action_type == "FLAG":
-        cs = game._cell_states[r][c]
+        cs = game.get_cell_state(r, c)
         if cs == CellState.HIDDEN:
             game.flag(r, c)
             st.session_state.log.log_move(r, c, "FLAG", "Human", "Player flagged cell")
